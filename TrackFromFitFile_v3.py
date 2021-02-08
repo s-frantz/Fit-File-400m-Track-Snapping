@@ -391,3 +391,6 @@ while n > 0: # -1's are unclassed outliers
 # https://hdbscan.readthedocs.io/en/latest/basic_hdbscan.html
 # https://scikit-learn.org/stable/modules/clustering.html
 # https://mathworld.wolfram.com/Ellipse.html
+
+# installed JDK: https://www.oracle.com/java/technologies/javase-jdk15-downloads.html 
+# installed FIT SDK: https://developer.garmin.com/fit/download/
