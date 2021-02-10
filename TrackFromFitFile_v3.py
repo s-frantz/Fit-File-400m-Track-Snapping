@@ -12,23 +12,80 @@ def FitFile_To_DF():
         ][["Local Number", "Value 1", "Value 2", "Value 3"]]
 
 
-def DD_to_UTM(ddArray): # used so the track dims will be in meters
-    # https://github.com/Turbo87/utm 
-    utmArrays = utm.from_latlon(ddArray[:,1:], ddArray[:,0:1])
-    return np.column_stack(( utmArrays[0], utmArrays[1] ))
+def EnterCorrectionsToFitFile(TrackWorkout):
+
+    def EditCsv():
+        def DeleteUnknowns():
+            i_msg = H.index("Message")
+            col_Indices = [i_msg] + [i for i, c in enumerate(H) if "Field" in c]
+            for i, r in reversed(list(enumerate(ROWS))):
+                for i_col in col_Indices:
+                    try:
+                        if ROWS[i][i_col]=="unknown":
+                            del ROWS[i]
+                            break
+                    except IndexError:
+                        break
+        R = csv.reader(open(CSV))
+        ROWS = list(R)
+        H = ROWS[0]
+        i_lon = H.index("Value 3")
+        i_lat = H.index("Value 2")
+        for lon, lat, ts, index in TrackWorkout:
+            i = int(index)
+            lon = str(round(lon))
+            lat = str(round(lat))
+            ROWS[i][i_lon] = lon
+            ROWS[i][i_lat] = lat
+        DeleteUnknowns()
+        W = csv.writer(open(CSV, "w", newline=""))
+        W.writerows(ROWS)
+
+    def Csv_To_FitFile():
+        java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
+        FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
+        java_CMD = [java, "-jar", FitCSVTool_jar, "-c", CSV, FIT.replace(".FIT", "3.FIT")]
+        subprocess.call(java_CMD, stdout=subprocess.DEVNULL)
+
+    EditCsv()
+    Csv_To_FitFile()
 
 
-def DF_to_UtmArray():
+def Semicircles_to_DecimalDegrees(scArray):
+    return scArray * (180 / 2 ** 31)
+
+def DecimalDegrees_to_Semicircles(ddArray):
+    return ddArray * (2 ** 31 / 180)
+
+def DecimalDegrees_to_Utm(ddArray): # used so the track dims will be in meters
+    utmArrays = utm.from_latlon(ddArray[:,1:2], ddArray[:,0:1])
+    return np.column_stack(( utmArrays[0], utmArrays[1] )), utmArrays[2:]
+
+def Utm_to_DecimalDegrees(utmArray, zone):
+    ddArrays = utm.to_latlon(utmArray[:,0:1], utmArray[:,1:2], zone[0], zone[1])
+    return np.column_stack(( ddArrays[1], ddArrays[0] ))
+
+
+def Dataframe_to_UtmArray():
     lon, lat, ts, I = "Value 3", "Value 2", "Value 1", "I"
-    df[I] = df.index
+    df[I] = df.index + 1
     TS = df[[ ts, I ]].to_numpy()
     XY_sc = df[[ lon, lat ]].to_numpy()
-    XY_dd = XY_sc * (180 / 2 ** 31) # semicircles to decimal degrees
-    XY_utm = DD_to_UTM(XY_dd)
+    XY_dd = Semicircles_to_DecimalDegrees(XY_sc)
+    XY_utm, UtmZone = DecimalDegrees_to_Utm(XY_dd)
     X, Y = XY_utm[:,0:1], XY_utm[:,1:]
     X_min, Y_min = X.min(), Y.min()
     XY_utm_adjusted = np.hstack(( X-X_min, Y-Y_min, TS))
-    return XY_utm_adjusted, X_min, Y_min
+    return XY_utm_adjusted, X_min, Y_min, UtmZone
+
+
+def XY_BackTo_Semicircles(utmArray, X_min, Y_min, UtmZone):
+    non_spatial_attributes = utmArray[:, 2:]
+    X_utm, Y_utm = utmArray[:,0:1]+X_min, utmArray[:,1:2]+Y_min
+    XY_utm = np.hstack(( X_utm, Y_utm ))
+    XY_dd = Utm_to_DecimalDegrees(XY_utm, UtmZone)
+    XY_sc = DecimalDegrees_to_Semicircles(XY_dd)
+    return np.hstack(( XY_sc, non_spatial_attributes ))
 
 
 def Cluster(input_array, min_cluster_size):
@@ -180,19 +237,21 @@ def Generate400mTrack(ellipseArray, debugging=False):
     return np.concatenate((Curve1, Back_Straight, Curve2, Home_Straight))
 
 
-def SnapWorkoutToTrack(workout, track):
+def SnapClusterToTrack(workout, track):
 
     def SnapToTrackNode():
         # returns index of closest coordinates on track
         distance_to_track = float("inf")
         steps, track_position = 0, 0
+        bestTx, bestTy = None, None
         for Tx, Ty in track:
             steps += 1
             distance = ((Wx - Tx) ** 2 + (Wy - Ty) ** 2) ** (1/2)
             if distance < distance_to_track:
                 distance_to_track = distance
                 track_position = steps
-        return track_position, Tx, Ty
+                bestTx, bestTy = Tx, Ty
+        return track_position, bestTx, bestTy
 
     def TrackNodesTraversed():
         # returns number of track nodes traversed
@@ -216,7 +275,7 @@ def SnapWorkoutToTrack(workout, track):
         if last_ts is None: last_ts = ts
         time_delta = ts - last_ts#.total_seconds()
         track_position, track_X, track_Y = SnapToTrackNode()
-        SnappedWorkout.append([I, track_X, track_Y, ts])
+        SnappedWorkout.append([track_X, track_Y, ts, I])
         if last_track_position is None: last_track_position = track_position
         steps_taken = TrackNodesTraversed()
         # record this advance
@@ -262,60 +321,85 @@ def FitTrackToCluster(a):
     s = LeastSquaresEllipse()
     ellipseArray = GeneratePointsAlongEllipse(s, X.min(), X.max())
     return Generate400mTrack(ellipseArray)
-    
+
+
+def TracklikeCluster(n, clusters):
+    ##print("\n{} clusters discovered...".format(n))
+    # ahh... just realized you would never go to two tracks...
+    # so see if there is a way to conclude this while statement (as a function)
+    # returning False if no candidate cluster checks out, and the best cluster if one does
+    while n > 0: # -1's are unclassed outliers
+        n = n - 1
+        cluster = clusters[
+            np.where( # current cluster ID and probability .9+
+                (clusters[:, 0]==n) * (clusters[:, 1] > 0.89) 
+                )
+        ][:, 2:]
+        # test to see the quality of ellipse fit for the cluster
+        #print("\ncluster index {} contains {} points".format(n, len(cluster)))
+        if len(cluster)>500:
+            return True, cluster 
+    return False, None
+
 
 # MAIN
-import sys, os, subprocess
-import pandas as pd, numpy as np
-import utm, hdbscan
-import seaborn as sns, matplotlib.pyplot as plt
-sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
-from apyx import JsonPrettyPrint
+import time
 
-FIT = r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
-CSV = FIT.lower().replace(".fit", ".csv")
+for timetest in range(10):
 
-df = FitFile_To_DF()
-UtmArray, X_min, Y_min = DF_to_UtmArray()
-n_clusters, clusters = Cluster(UtmArray[:, :2], min_cluster_size=50)
-clusters = np.hstack(( clusters, UtmArray[:, 2:] ))
-#["X", "Y", "label", "prob", "ts", "index"]
-print("\n{} clusters discovered...".format(n_clusters))
-n = n_clusters
-# ahh... just realized you would never go to two tracks...
-# so see if there is a way to conclude this while statement (as a function)
-# returning False if no candidate cluster checks out, and the best cluster if one does
-while n > 0: # -1's are unclassed outliers
-    n = n - 1
-    cluster = clusters[
-        np.where( # current cluster ID and probability .9+
-            (clusters[:, 0]==n) * (clusters[:, 1] > 0.89) 
-            )
-    ][:, 2:]
-    # test to see the quality of ellipse fit for the cluster
-    print("\ncluster index {} contains {} points".format(n, len(cluster)))
-    if len(cluster)>500:
-        # return cluster
-        trackArray = FitTrackToCluster(cluster)
-        snappedCluster = SnapWorkoutToTrack(cluster, trackArray)
-        # convert this array[:, 1:3] back to...
-            # UTM (unadjust, adding back Xmin and Ymin)
-            # DD (using the converter)
-            # SC (using the formula)
-        # then use the array to edit the csv
-        # go through those columns in the csv and try: except 
-        # looking up cooresponding index values from the semicircle array
-        # then write the CSV back to fit format
-        # turns out i only needed the timestamps to truth that this is working...
-        # plot with both the PlotEllipse function (rename) and the 
-        #labels, probs = clusters[:, 0], clusters[:, 1]
-        #PlotEllipse(x, xMin, xMax, yMin, yMax, ellipseArray, n, n_clusters, trackArray)
+    start = time.time()
+
+    import sys, os, subprocess, csv
+    import pandas as pd, numpy as np
+    import utm, hdbscan
+    import seaborn as sns, matplotlib.pyplot as plt
+    sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
+    from apyx import JsonPrettyPrint
+
+    FIT = r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
+    CSV = FIT.lower().replace(".fit", ".csv")
+
+    df = FitFile_To_DF()
+    UtmArray, X_min, Y_min, UtmZone = Dataframe_to_UtmArray()
+    n_clusters, clusters = Cluster(UtmArray[:, :2], min_cluster_size=50)
+    clusters = np.hstack(( clusters, UtmArray[:, 2:] )) #["X", "Y", "label", "prob", "ts", "index"]
+    tracklike_cluster_found, cluster = TracklikeCluster(n_clusters, clusters)
+    if not tracklike_cluster_found:
+        print("No tracklike XY cluster detected in this activity.")
+        #return original fit file
+    trackArray = FitTrackToCluster(cluster)
+    snappedCluster = SnapClusterToTrack(cluster, trackArray)
+    TrackWorkout = XY_BackTo_Semicircles(snappedCluster, X_min, Y_min, UtmZone)
+
+    FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout)
+
+    print("{}s elapsed".format(round(time.time()-start, 3)))
+
+#return FIT_Snapped
+
+
+#print(snappedWorkout)
+
+# integrate and return new fit file
+# convert this array[:, 1:3] back to...
+    # UTM (unadjust, adding back Xmin and Ymin)
+    # DD (using the converter)
+    # SC (using the formula)
+# then use the array to edit the csv
+# go through those columns in the csv and try: except 
+# looking up cooresponding index values from the semicircle array
+# then write the CSV back to fit format
+# turns out i only needed the timestamps to truth that this is working...
+# plot with both the PlotEllipse function (rename) and the 
+#labels, probs = clusters[:, 0], clusters[:, 1]
+#PlotEllipse(x, xMin, xMax, yMin, yMax, ellipseArray, n, n_clusters, trackArray)
 
 # RESOURCES
 # https://hdbscan.readthedocs.io/en/latest/basic_hdbscan.html
 # https://scikit-learn.org/stable/modules/clustering.html
 # https://mathworld.wolfram.com/Ellipse.html
 
+# installed utm: https://github.com/Turbo87/utm 
 # installed JDK: https://www.oracle.com/java/technologies/javase-jdk15-downloads.html 
 # installed FIT SDK: https://developer.garmin.com/fit/download/
 
