@@ -12,9 +12,10 @@ def FitFile_To_DF():
         ][["Local Number", "Value 1", "Value 2", "Value 3"]]
 
 
-def EnterCorrectionsToFitFile(TrackWorkout):
+def EnterCorrectionsToFitFile(TrackWorkout, Track):
 
     def EditCsv():
+
         def DeleteUnknowns():
             i_msg = H.index("Message")
             col_Indices = [i_msg] + [i for i, c in enumerate(H) if "Field" in c]
@@ -26,17 +27,72 @@ def EnterCorrectionsToFitFile(TrackWorkout):
                             break
                     except IndexError:
                         break
+        def XY_TrackPosition(p):
+            return Track[:, :][p]
+        def NeedToInterpolateCurve(): # between this point and next point
+            if ts - ts_next > 20:
+                return False
+            if c_s == 0 or c_s_next == 0: # if this point occurs on a curve or next point is on a curve
+                if c_s_next.size==0: # next point is not adjacent - means there was a time stop
+                    return False
+                return True
+            return False
+        def InterpolateCurve():
+            #print("{}: ({})".format(
+            #    "Curve" if c_s == 0 else "Straight", NeedToInterpolateCurve()))
+            position_next = int(next[:, 2])
+            Steps, Direction = TrackNodesTraversed(position, position_next, len(Track))
+            PointsBetween = Steps - 1
+            interpolationRow = []
+            for data_index, data_val in enumerate(ROWS[i]):
+                try:
+                    numerical_data_val = float(data_val)
+                    numerical_type = len(data_val.split(".")[1]) if "." in data_val else 0
+                    next_row_numerical_val = float(ROWS[i-1][data_index])
+                    interpolationRow.append(((next_row_numerical_val - numerical_data_val)/Steps, numerical_type))
+                except ValueError:
+                    interpolationRow.append(data_val) # field label text or whatever, just dont mess with it
+            start_row, track_node = ROWS[i], position
+            while_loops = 0
+            while PointsBetween > 0:
+                new_row = []
+                for value_index, new_value in enumerate(interpolationRow):
+                    if isinstance(new_value, tuple):
+                        round_to = new_value[1]
+                        new_value = float(start_row[value_index]) + (new_value[0])*while_loops
+                        new_value = int(round(new_value)) if round_to == 0 else round(new_value, round_to)
+                    new_row.append(str(new_value))
+                #print(new_row)
+                if Direction=="+": track_node += 1
+                else: track_node -= 1
+                if track_node < 0: track_node = len(Track)-1
+                if track_node > len(Track)-1: track_node = 0
+                interp_lon, interp_lat = XY_TrackPosition(track_node)
+                new_row[i_lon] = interp_lon
+                new_row[i_lat] = interp_lat
+                ROWS.insert(i, new_row)
+                PointsBetween -= 1
+
         R = csv.reader(open(CSV))
         ROWS = list(R)
         H = ROWS[0]
         i_lon = H.index("Value 3")
         i_lat = H.index("Value 2")
-        for lon, lat, ts, index in TrackWorkout:
+
+        for index, ts, position, c_s in reversed(TrackWorkout):
+        # reversed allows inserting without altering indices encountered later
             i = int(index)
-            lon = str(round(lon))
-            lat = str(round(lat))
-            ROWS[i][i_lon] = lon
-            ROWS[i][i_lat] = lat
+            position = int(position)
+            lon, lat = XY_TrackPosition(position)
+            ROWS[i][i_lon] = str(round(lon))
+            ROWS[i][i_lat] = str(round(lat))
+
+            next = TrackWorkout[TrackWorkout[:, 0]==index-1]
+            c_s_next = next[:, 3]
+            ts_next = next[:, 1]
+
+            if NeedToInterpolateCurve(): InterpolateCurve()
+
         DeleteUnknowns()
         W = csv.writer(open(CSV, "w", newline=""))
         W.writerows(ROWS)
@@ -80,12 +136,12 @@ def Dataframe_to_UtmArray():
 
 
 def XY_BackTo_Semicircles(utmArray, X_min, Y_min, UtmZone):
-    non_spatial_attributes = utmArray[:, 2:]
+    #non_spatial_attributes = utmArray[:, 2:]
     X_utm, Y_utm = utmArray[:,0:1]+X_min, utmArray[:,1:2]+Y_min
     XY_utm = np.hstack(( X_utm, Y_utm ))
     XY_dd = Utm_to_DecimalDegrees(XY_utm, UtmZone)
-    XY_sc = DecimalDegrees_to_Semicircles(XY_dd)
-    return np.hstack(( XY_sc, non_spatial_attributes ))
+    return DecimalDegrees_to_Semicircles(XY_dd)
+    #return np.hstack(( XY_sc, non_spatial_attributes ))
 
 
 def Cluster(input_array, min_cluster_size):
@@ -142,7 +198,7 @@ def GeneratePointsAlongEllipse(coeffs, xMin, xMax):
     return np.array(pointsAlongEllipse)
 
 
-def Generate400mTrack(ellipseArray, debugging=False):
+def Generate400mTrack(ellipseArray):
 
     def PointOfMaxDistance(fromPT):
         fromX, fromY = fromPT
@@ -164,10 +220,10 @@ def Generate400mTrack(ellipseArray, debugging=False):
 
     def GeneratePointsAlongCircle(center, radius, start_theta):
         circle_points = []
-        curve_length = round(Pi * radius)
+        curve_length = Pi * radius
         theta_step = Pi / curve_length
-        theta = start_theta
-        while theta < start_theta + Pi:#2 * Pi:
+        theta = start_theta + theta_step / 2
+        while theta < start_theta + Pi:
             x1 = center[0] + radius * np.cos(theta)
             y1 = center[1] + radius * np.sin(theta)
             circle_points.append([x1, y1])
@@ -178,9 +234,9 @@ def Generate400mTrack(ellipseArray, debugging=False):
         straightaway_points = []
         sX, sY = start
         fX, fY = finish
-        straightaway_length = round(((fX - sX)**2 + (fY - sY)**2)**(1/2))
-        distance = 0
-        while distance < straightaway_length:
+        straightaway_length = ((fX - sX)**2 + (fY - sY)**2)**(1/2)
+        distance = 0.5 # start at half a meter from start of straightaway
+        while distance < straightaway_length - 0.5: # end at least half a meter from end of straightaway
             sX = sX - np.cos(theta)
             sY = sY - np.sin(theta)
             straightaway_points.append([sX, sY])
@@ -204,15 +260,6 @@ def Generate400mTrack(ellipseArray, debugging=False):
     W = 2 * r_T
     L = 2*W + 200 - 2*r_T - Pi * r_T
     centerDefCircle_DistanceFromTrackCenter = (L / 2) - r_T
-    if debugging:
-        print(" - track center:  {}\n - width, length: {}, {}\n - defC_R, defCf_offset: {}, {}".format(
-            (round(cent[0], 2), round(cent[1], 2)),
-            round(W, 2),
-            round(L, 2),
-            round(r_T, 2),
-            round(centerDefCircle_DistanceFromTrackCenter, 2),
-            )
-        )
     m = (cent[1] - end1[1]) / (cent[0] - end1[0])
     r = centerDefCircle_DistanceFromTrackCenter
     # formula derived in merrill lynch notebook
@@ -221,8 +268,6 @@ def Generate400mTrack(ellipseArray, debugging=False):
     changeY1 = m * changeX1
     C1 = (cent[0] + changeX1, cent[1] + changeY1)
     C2 = (cent[0] - changeX1, cent[1] - changeY1)
-    if debugging:
-        print(" - center def circle 1: {}\n - center def circle 2: {}".format(C1, C2))
     # Build an array of points along track...
     track_angle = np.arctan(m)
     # Curves
@@ -234,10 +279,23 @@ def Generate400mTrack(ellipseArray, debugging=False):
     Back_Straight = GeneratePointsAlongStraightaway(One_Hundo, Two_Hundo, track_angle)
     Home_Straight = GeneratePointsAlongStraightaway(Three_Hundo, Start_Finish, track_angle+Pi)
     # Combine to create track!
-    return np.concatenate((Curve1, Back_Straight, Curve2, Home_Straight))
+    return np.concatenate((Curve1, Back_Straight, Curve2, Home_Straight)), len(Curve1)
 
 
-def SnapClusterToTrack(workout, track):
+def TrackNodesTraversed(ORIG, DEST, MAX):
+    nodes_traversed = 0
+    forward, backward = ORIG, ORIG
+    while forward != DEST and backward != DEST:
+        nodes_traversed+=1
+        forward+=1
+        backward-=1
+        if forward>MAX-1: forward=0
+        if backward<0: backward=MAX-1
+    direction = "+" if forward==DEST else "-"
+    return nodes_traversed, direction
+
+
+def SnapClusterToTrack(workout, track, curveLength):
 
     def SnapToTrackNode():
         # returns index of closest coordinates on track
@@ -245,25 +303,20 @@ def SnapClusterToTrack(workout, track):
         steps, track_position = 0, 0
         bestTx, bestTy = None, None
         for Tx, Ty in track:
-            steps += 1
             distance = ((Wx - Tx) ** 2 + (Wy - Ty) ** 2) ** (1/2)
             if distance < distance_to_track:
                 distance_to_track = distance
                 track_position = steps
                 bestTx, bestTy = Tx, Ty
-        return track_position, bestTx, bestTy
-
-    def TrackNodesTraversed():
-        # returns number of track nodes traversed
-        nodes_traversed = 0
-        forward, backward = last_track_position, last_track_position
-        while forward != track_position and backward != track_position:
-            nodes_traversed+=1
-            forward+=1
-            backward-=1
-            if forward>len(track): forward=1
-            if backward<1: backward=len(track)
-        return nodes_traversed
+            steps += 1
+        #if distance_to_track > 30: # probably don't want to snap in this case...
+        #    print(distance_to_track)
+        #    print(track_position)
+        curve_straight = 0 if (
+            track_position < curveLength or (
+            track_position > 200 and track_position < 200+curveLength)
+            ) else 1
+        return track_position, curve_straight
 
     SnappedWorkout = [] #index: (ts, track_Y, track_X)
     splits = {} #lap: (time_s, distance_m, 400m_pace)
@@ -274,10 +327,10 @@ def SnapClusterToTrack(workout, track):
     for Wx, Wy, ts, I in workout:
         if last_ts is None: last_ts = ts
         time_delta = ts - last_ts#.total_seconds()
-        track_position, track_X, track_Y = SnapToTrackNode()
-        SnappedWorkout.append([track_X, track_Y, ts, I])
+        track_position, curve_straight = SnapToTrackNode()
+        SnappedWorkout.append([I, ts, track_position, curve_straight])
         if last_track_position is None: last_track_position = track_position
-        steps_taken = TrackNodesTraversed()
+        steps_taken, direction = TrackNodesTraversed(last_track_position, track_position, MAX=len(track))
         # record this advance
         if time_delta > 10:
             # this is the start of a new lap
@@ -332,7 +385,7 @@ def TracklikeCluster(n, clusters):
         n = n - 1
         cluster = clusters[
             np.where( # current cluster ID and probability .9+
-                (clusters[:, 0]==n) * (clusters[:, 1] > 0.89) 
+                (clusters[:, 0]==n) * (clusters[:, 1] > 0.5) 
                 )
         ][:, 2:]
         # test to see the quality of ellipse fit for the cluster
@@ -342,55 +395,52 @@ def TracklikeCluster(n, clusters):
     return False, None
 
 
+def StoreResults(InitialArray, TrackArray, FinalArray):
+    store = FIT.replace(".FIT", ".npz")
+    np.savez(store, InitialArray, TrackArray, FinalArray)
+
+
+
 # MAIN
 import time
+start = time.time()
 
-for timetest in range(10):
+import sys, os, subprocess, csv
+import pandas as pd, numpy as np
+import utm, hdbscan
+import seaborn as sns, matplotlib.pyplot as plt
+sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
+from apyx import JsonPrettyPrint
 
-    start = time.time()
+FIT = r"C:\Users\silas.frantz\Desktop\B2A84849.FIT"
+        #r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
+CSV = FIT.lower().replace(".fit", ".csv")
 
-    import sys, os, subprocess, csv
-    import pandas as pd, numpy as np
-    import utm, hdbscan
-    import seaborn as sns, matplotlib.pyplot as plt
-    sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
-    from apyx import JsonPrettyPrint
+df = FitFile_To_DF()
+UtmArray, X_min, Y_min, UtmZone = Dataframe_to_UtmArray()
+n_clusters, clusters = Cluster(UtmArray[:, :2], min_cluster_size=50)
+clusters = np.hstack(( clusters, UtmArray[:, 2:] )) #["X", "Y", "label", "prob", "ts", "index"]
+tracklike_cluster_found, cluster = TracklikeCluster(n_clusters, clusters)
+if not tracklike_cluster_found:
+    print("No tracklike XY cluster detected in this activity.")
+    #return original fit file
+trackArray, curveLength = FitTrackToCluster(cluster)
+TrackWorkout = SnapClusterToTrack(cluster, trackArray, curveLength) # index_csv, timestamp, track_position_index, curve_or_straight
+trackArray_UTM = XY_BackTo_Semicircles(trackArray, X_min, Y_min, UtmZone)
+FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout, trackArray_UTM)
+StoreResults(
+    InitialArray=cluster,
+    TrackArray=trackArray,
+    FinalArray=TrackWorkout,
+)
 
-    FIT = r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
-    CSV = FIT.lower().replace(".fit", ".csv")
-
-    df = FitFile_To_DF()
-    UtmArray, X_min, Y_min, UtmZone = Dataframe_to_UtmArray()
-    n_clusters, clusters = Cluster(UtmArray[:, :2], min_cluster_size=50)
-    clusters = np.hstack(( clusters, UtmArray[:, 2:] )) #["X", "Y", "label", "prob", "ts", "index"]
-    tracklike_cluster_found, cluster = TracklikeCluster(n_clusters, clusters)
-    if not tracklike_cluster_found:
-        print("No tracklike XY cluster detected in this activity.")
-        #return original fit file
-    trackArray = FitTrackToCluster(cluster)
-    snappedCluster = SnapClusterToTrack(cluster, trackArray)
-    TrackWorkout = XY_BackTo_Semicircles(snappedCluster, X_min, Y_min, UtmZone)
-
-    FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout)
-
-    print("{}s elapsed".format(round(time.time()-start, 3)))
+print("{}s elapsed".format(round(time.time()-start, 3)))
 
 #return FIT_Snapped
 
 
 #print(snappedWorkout)
 
-# integrate and return new fit file
-# convert this array[:, 1:3] back to...
-    # UTM (unadjust, adding back Xmin and Ymin)
-    # DD (using the converter)
-    # SC (using the formula)
-# then use the array to edit the csv
-# go through those columns in the csv and try: except 
-# looking up cooresponding index values from the semicircle array
-# then write the CSV back to fit format
-# turns out i only needed the timestamps to truth that this is working...
-# plot with both the PlotEllipse function (rename) and the 
 #labels, probs = clusters[:, 0], clusters[:, 1]
 #PlotEllipse(x, xMin, xMax, yMin, yMax, ellipseArray, n, n_clusters, trackArray)
 
@@ -404,9 +454,6 @@ for timetest in range(10):
 # installed FIT SDK: https://developer.garmin.com/fit/download/
 
 # 2021-02-08 notes to continue...
-# try writing a csv back to a fit file
-    # first the same one, then the same one with a slight modification (e.g. just one location digit)
-# figure out how to enter changes without changing the csv format in any way
 # generate a line graph of the workout and pace (like strava does)
 # do this from the initial array, then snap to track and look at the final array
 # should be apparent immediately if there are big differences
