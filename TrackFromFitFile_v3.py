@@ -1,4 +1,4 @@
-def FitFile_To_DF():
+def FitFile_To_DF(FIT):
     java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
     FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
     java_CMD = [java, "-jar", FitCSVTool_jar, "-b", FIT, CSV]
@@ -97,14 +97,19 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
         W = csv.writer(open(CSV, "w", newline=""))
         W.writerows(ROWS)
 
+        return ROWS
+
     def Csv_To_FitFile():
         java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
         FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
-        java_CMD = [java, "-jar", FitCSVTool_jar, "-c", CSV, FIT.replace(".FIT", "3.FIT")]
+        java_CMD = [java, "-jar", FitCSVTool_jar, "-c", CSV, snappedFit]
         subprocess.call(java_CMD, stdout=subprocess.DEVNULL)
 
-    EditCsv()
+    snappedFit = FIT.replace(".FIT", "_snapped.FIT")
+    csvRows = EditCsv()
     Csv_To_FitFile()
+
+    return csvRows, snappedFit
 
 
 def Semicircles_to_DecimalDegrees(scArray):
@@ -122,7 +127,7 @@ def Utm_to_DecimalDegrees(utmArray, zone):
     return np.column_stack(( ddArrays[1], ddArrays[0] ))
 
 
-def Dataframe_to_UtmArray():
+def Dataframe_to_UtmArray(df, X_min=None, Y_min=None):
     lon, lat, ts, I = "Value 3", "Value 2", "Value 1", "I"
     df[I] = df.index + 1
     TS = df[[ ts, I ]].to_numpy()
@@ -130,7 +135,8 @@ def Dataframe_to_UtmArray():
     XY_dd = Semicircles_to_DecimalDegrees(XY_sc)
     XY_utm, UtmZone = DecimalDegrees_to_Utm(XY_dd)
     X, Y = XY_utm[:,0:1], XY_utm[:,1:]
-    X_min, Y_min = X.min(), Y.min()
+    if X_min is None and Y_min is None:
+        X_min, Y_min = X.min(), Y.min()
     XY_utm_adjusted = np.hstack(( X-X_min, Y-Y_min, TS))
     return XY_utm_adjusted, X_min, Y_min, UtmZone
 
@@ -395,9 +401,9 @@ def TracklikeCluster(n, clusters):
     return False, None
 
 
-def StoreResults(InitialArray, TrackArray, FinalArray):
+def StoreResults(InitialArray, TrackArray, FinalArray, InterpolatedArray):
     store = FIT.replace(".FIT", ".npz")
-    np.savez(store, InitialArray, TrackArray, FinalArray)
+    np.savez(store, InitialArray, TrackArray, FinalArray, InterpolatedArray)
 
 
 
@@ -416,8 +422,8 @@ FIT = r"C:\Users\silas.frantz\Desktop\B2A84849.FIT"
         #r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
 CSV = FIT.lower().replace(".fit", ".csv")
 
-df = FitFile_To_DF()
-UtmArray, X_min, Y_min, UtmZone = Dataframe_to_UtmArray()
+df = FitFile_To_DF(FIT)
+UtmArray, X_min, Y_min, UtmZone = Dataframe_to_UtmArray(df)
 n_clusters, clusters = Cluster(UtmArray[:, :2], min_cluster_size=50)
 clusters = np.hstack(( clusters, UtmArray[:, 2:] )) #["X", "Y", "label", "prob", "ts", "index"]
 tracklike_cluster_found, cluster = TracklikeCluster(n_clusters, clusters)
@@ -427,19 +433,20 @@ if not tracklike_cluster_found:
 trackArray, curveLength = FitTrackToCluster(cluster)
 TrackWorkout = SnapClusterToTrack(cluster, trackArray, curveLength) # index_csv, timestamp, track_position_index, curve_or_straight
 trackArray_UTM = XY_BackTo_Semicircles(trackArray, X_min, Y_min, UtmZone)
-FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout, trackArray_UTM)
+CSV_Rows, FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout, trackArray_UTM)
+
+# prepare to visualize... need to pickle numpy array of final points w/ interpolations
+df_snapped = FitFile_To_DF(FIT_Snapped)
+UtmArray_Snapped, X_min, Y_min, UtmZone = Dataframe_to_UtmArray(df_snapped, X_min, Y_min)
+
 StoreResults(
     InitialArray=cluster,
     TrackArray=trackArray,
     FinalArray=TrackWorkout,
+    InterpolatedArray=UtmArray_Snapped,
 )
 
 print("{}s elapsed".format(round(time.time()-start, 3)))
-
-#return FIT_Snapped
-
-
-#print(snappedWorkout)
 
 #labels, probs = clusters[:, 0], clusters[:, 1]
 #PlotEllipse(x, xMin, xMax, yMin, yMax, ellipseArray, n, n_clusters, trackArray)
