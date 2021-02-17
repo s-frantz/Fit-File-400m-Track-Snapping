@@ -5,7 +5,7 @@ import dash_html_components as html
 import plotly.graph_objects as go
 import pandas as pd
 
-FIT = r"C:\Users\silas.frantz\Desktop\B2A84849.FIT"
+FIT = r"C:\Users\silas.frantz\Desktop\B2FE1101.FIT"#B2A84849.FIT"
 npz = np.load(FIT.replace(".FIT", ".npz"))
 
 init_array = npz["arr_0"] #[X, Y, ts, I] (I = index of row in original csv)
@@ -14,6 +14,7 @@ final_array = npz["arr_2"] #[I, ts, P_index, curve_straight]
 interpolated_array = npz["arr_3"] #[X, Y, ts, I] (I = index of row in original csv)
 
 ts_min = init_array[:, 2].min()
+
 init_array[:, 2] = init_array[:, 2]-ts_min
 final_array[:, 1] = final_array[:, 1]-ts_min
 interpolated_array[:, 2] = interpolated_array[:, 2]-ts_min
@@ -21,6 +22,27 @@ interpolated_array[:, 2] = interpolated_array[:, 2]-ts_min
 ts_max = init_array[:, 2].max()
 x_max = init_array[:, 0].max()
 y_max = init_array[:, 1].max()
+
+x_min = init_array[:, 0].min()
+y_min = init_array[:, 1].min()
+
+if False:
+    print(track_array[:, 0].max())
+    print(init_array[:, 0].max())
+    print(interpolated_array[:, 0].max())
+
+    print(track_array[:, 0].min())
+    print(init_array[:, 0].min())
+    print(interpolated_array[:, 0].min())
+    print(" ")
+    print(track_array[:, 1].max())
+    print(init_array[:, 1].max())
+    print(interpolated_array[:, 1].max())
+
+    print(track_array[:, 1].min())
+    print(init_array[:, 1].min())
+    print(interpolated_array[:, 1].min())
+
 
 interpolated_array = interpolated_array[
     np.logical_and(interpolated_array[:, 2] > 0, interpolated_array[:, 2] < ts_max)
@@ -66,77 +88,62 @@ x, y, z = df_final_joined["lon"], df_final_joined["lat"], df_final_joined["times
 x1, y1, z1 = df_interpolated["lon"], df_interpolated["lat"], df_interpolated["timestamp"]
 x_init, y_init, z_init = df_init["lon"], df_init["lat"], df_init["timestamp"]
 
-df_snap = pd.DataFrame( [t for I in df_final_joined["I"] for t in [
+df_snap = pd.DataFrame(
+    [
+        t for I in df_final_joined["I"] for t in [
             [   float(df_init['lon'].loc[df_init['I']==I]),
                 float(df_init['lat'].loc[df_init['I']==I]),
-                float(df_init['timestamp'].loc[df_init['I']==I])], 
+                float(df_init['timestamp'].loc[df_init['I']==I])
+            ], 
             [   float(df_final_joined['lon'].loc[df_final_joined['I']==I]),
                 float(df_final_joined['lat'].loc[df_final_joined['I']==I]),
-                float(df_final_joined['timestamp'].loc[df_final_joined['I']==I])],
-            [   None, None, None]
-            ]],
-            columns=["X", "Y", "Z"])
-
-fig = go.Figure(data=[
-    
-    go.Scatter3d(
-            x=x[:1], y=y[:1], z=z[:1],
-            marker=dict(
-                size=3,
-            )),
-    
-    go.Scatter3d(
-    x=x, y=y, z=z,
-    marker=dict(
-        size=2.75,
-        color=z,
-        colorscale='Portland',#'Viridis',
-    ),
-    mode="markers",
-    #line=dict(
-    #    color='#432E49',#'#607EA0',#'lightblue',#'#303030', #'#4B312C',
-    #    width=1.5
-    #    )
-    ),
-    go.Scatter3d(
-    x=x1, y=y1, z=z1,
-    marker=dict(
-        size=1,
-        color=z1,
-        colorscale='Portland',#'Viridis',
-    ),
-    line=dict(
-        color='#303030',#'#432E49',#'#607EA0',#'lightblue',#'#303030', #'#4B312C',
-        width=1.5
-        )
-    ),
-    #go.Scatter3d(
-    #x=x_init, y=y_init, z=z_init,
-    #marker=dict(
-    #    size=1.5,
-    #    color='#606060',
-    #    ),
-    #mode='markers',
-    #),
-    go.Scatter3d(
-    x=df_snap["X"], y=df_snap["Y"], z=df_snap["Z"],
-    marker=dict(
-        size=1.5,
-        color='gray',
-        ),
-    line=dict(
-        color='#303030', #'#4B312C',
-        width=.5
-        ),
-    mode='markers+lines',
-    )
+                float(df_final_joined['timestamp'].loc[df_final_joined['I']==I])
+            ],
+            [   None, None, None
+            ],
+        ]
     ],
-    frames=[go.Frame(data=go.Scatter3d(
-            x=x[k:k+1], y=y[k:k+1], z=z[k:k+1],
-            marker=dict(
-                size=10,
-            ))) for k in range(len(x1))]
-    )
+    columns=["X", "Y", "Z"]
+)
+
+fig = go.Figure(
+    data=[
+        go.Scatter3d(
+            x=x[:1], y=y[:1], z=z[:1],
+            marker=dict(size=3),
+            name="Animation",
+        ),
+        go.Scatter3d(
+            x=df_snap["X"], y=df_snap["Y"], z=df_snap["Z"],
+            marker=dict(size=1.5, color='gray'),
+            line=dict(color='#303030',width=.5),
+            mode='markers+lines',
+            visible='legendonly',
+            name="Original GPS nodes"
+        ),
+        go.Scatter3d(
+            x=x, y=y, z=z,
+            marker=dict(size=2.75, color=z, colorscale='Portland'),
+            mode="markers",
+            visible='legendonly',
+            name="Snapped GPS nodes",
+        ),
+        go.Scatter3d(
+            x=x1, y=y1, z=z1,
+            marker=dict(size=1.1, color=z1, colorscale='Portland'),
+            line=dict(color='#303030',width=1.5),
+            name="Interpolated Track",
+        ),
+    ],
+    frames=[
+        go.Frame(
+            data=go.Scatter3d(
+                x=x[k:k+1], y=y[k:k+1], z=z[k:k+1],
+                marker=dict(size=10)
+            )
+        ) for k in range(len(x1))
+    ]
+)
 
 fig.update_layout(
     #hovermode='x',

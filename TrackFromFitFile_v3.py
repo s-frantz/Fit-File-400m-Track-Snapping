@@ -30,17 +30,28 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
         def XY_TrackPosition(p):
             return Track[:, :][p]
         def NeedToInterpolateCurve(): # between this point and next point
+            next_ = TrackWorkout[TrackWorkout[:, 0]==index-1]
+            c_s_next, ts_next = next_[:, 3], next_[:, 1]
             if ts - ts_next > 20:
-                return False
+                return False, None, None, None
             if c_s == 0 or c_s_next == 0: # if this point occurs on a curve or next point is on a curve
-                if c_s_next.size==0: # next point is not adjacent - means there was a time stop
-                    return False
-                return True
-            return False
+                if c_s_next.size==0: # next point is not adjacent - means there is some kind of row between
+                    n_ = 2
+                    #while n_< 5:  # if one of the following 5 rows are good to go that's fine just use them :D
+                    #    n_+=1 
+                    next__ = TrackWorkout[TrackWorkout[:, 0]==index-n_]
+                    c_s_next, ts_next = next__[:, 3], next__[:, 1]
+                    if ts-ts_next > 20: # repeat timestamp check for other interp candidates
+                        return False, None, None, None
+                    if len(next__) > 0:
+                        return True, next__, c_s_next, ts_next
+                    return False, None, None, None
+                return True, next_, c_s_next, ts_next
+            return False, None, None, None
         def InterpolateCurve():
             #print("{}: ({})".format(
             #    "Curve" if c_s == 0 else "Straight", NeedToInterpolateCurve()))
-            position_next = int(next[:, 2])
+            position_next = int(next_[:, 2])
             Steps, Direction = TrackNodesTraversed(position, position_next, len(Track))
             PointsBetween = Steps - 1
             interpolationRow = []
@@ -87,11 +98,8 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
             ROWS[i][i_lon] = str(round(lon))
             ROWS[i][i_lat] = str(round(lat))
 
-            next = TrackWorkout[TrackWorkout[:, 0]==index-1]
-            c_s_next = next[:, 3]
-            ts_next = next[:, 1]
-
-            if NeedToInterpolateCurve(): InterpolateCurve()
+            needed, next_, c_s_next, ts_next = NeedToInterpolateCurve()
+            if needed: InterpolateCurve()
 
         DeleteUnknowns()
         W = csv.writer(open(CSV, "w", newline=""))
@@ -138,7 +146,7 @@ def Dataframe_to_UtmArray(df, X_min=None, Y_min=None):
     if X_min is None and Y_min is None:
         X_min, Y_min = X.min(), Y.min()
     XY_utm_adjusted = np.hstack(( X-X_min, Y-Y_min, TS))
-    return XY_utm_adjusted, X_min, Y_min, UtmZone
+    return XY_utm_adjusted, UtmZone, X_min, Y_min
 
 
 def XY_BackTo_Semicircles(utmArray, X_min, Y_min, UtmZone):
@@ -344,7 +352,7 @@ def SnapClusterToTrack(workout, track, curveLength):
             splits[lap_index] = (
                 lap_time,
                 "{}m".format(round(lap_dist)),
-                round(400*lap_time/lap_dist, 1)
+                round(400*lap_time/lap_dist, 1) if lap_dist != 0 else 0
             )
             lap_index+=1
             lap_time, lap_dist = 0, 0
@@ -363,7 +371,7 @@ def SnapClusterToTrack(workout, track, curveLength):
     if lap_dist != 0 and lap_time != 0: splits[lap_index] = (
         lap_time,
         "{}m".format(round(lap_dist)),
-        round(400*lap_time/lap_dist, 1)
+        round(400*lap_time/lap_dist, 1) if lap_dist != 0 else 0
     )
     #JsonPrettyPrint(splits)
     return np.array(SnappedWorkout)
@@ -397,8 +405,12 @@ def TracklikeCluster(n, clusters):
         # test to see the quality of ellipse fit for the cluster
         #print("\ncluster index {} contains {} points".format(n, len(cluster)))
         if len(cluster)>500:
-            return True, cluster 
-    return False, None
+            cluster_x_min = cluster[:, 0].min()
+            cluster_y_min = cluster[:, 1].min()
+            cluster[:, 0] = cluster[:, 0] - cluster_x_min
+            cluster[:, 1] = cluster[:, 1] - cluster_y_min
+            return True, cluster, cluster_x_min, cluster_y_min
+    return False, None, None, None
 
 
 def StoreResults(InitialArray, TrackArray, FinalArray, InterpolatedArray):
@@ -418,15 +430,18 @@ import seaborn as sns, matplotlib.pyplot as plt
 sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
 from apyx import JsonPrettyPrint
 
-FIT = r"C:\Users\silas.frantz\Desktop\B2A84849.FIT"
+FIT = r"C:\Users\silas.frantz\Desktop\B2FE1101.FIT"
+        #B2A84849.FIT"
         #r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
 CSV = FIT.lower().replace(".fit", ".csv")
 
 df = FitFile_To_DF(FIT)
-UtmArray, X_min, Y_min, UtmZone = Dataframe_to_UtmArray(df)
+UtmArray, UtmZone, X_min, Y_min = Dataframe_to_UtmArray(df)
 n_clusters, clusters = Cluster(UtmArray[:, :2], min_cluster_size=50)
 clusters = np.hstack(( clusters, UtmArray[:, 2:] )) #["X", "Y", "label", "prob", "ts", "index"]
-tracklike_cluster_found, cluster = TracklikeCluster(n_clusters, clusters)
+tracklike_cluster_found, cluster, X_min_track, Y_min_track = TracklikeCluster(n_clusters, clusters)
+X_min = X_min + X_min_track
+Y_min = Y_min + Y_min_track
 if not tracklike_cluster_found:
     print("No tracklike XY cluster detected in this activity.")
     #return original fit file
@@ -437,7 +452,7 @@ CSV_Rows, FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout, trackArray_UTM)
 
 # prepare to visualize... need to pickle numpy array of final points w/ interpolations
 df_snapped = FitFile_To_DF(FIT_Snapped)
-UtmArray_Snapped, X_min, Y_min, UtmZone = Dataframe_to_UtmArray(df_snapped, X_min, Y_min)
+UtmArray_Snapped, UtmZone, X_min, Y_min = Dataframe_to_UtmArray(df_snapped, X_min, Y_min)
 
 StoreResults(
     InitialArray=cluster,
