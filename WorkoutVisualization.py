@@ -5,21 +5,25 @@ import dash_html_components as html
 import plotly.graph_objects as go
 import pandas as pd
 
-FIT = r"C:\Users\silas.frantz\Desktop\B2FE1101.FIT"#B2A84849.FIT"
+FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\B2FE1101.FIT"
+    #B2H90533.FIT" #keira 4x1600
+    #B2A84849.FIT"
 npz = np.load(FIT.replace(".FIT", ".npz"))
 
-init_array = npz["arr_0"] #[X, Y, ts, I] (I = index of row in original csv)
+init_array = npz["arr_0"]   #[X, Y, ts, I] (I = index of row in original csv)
+                            #X, Y, I, ts, m_per_s
 track_array = npz["arr_1"] #[X, Y] index = P-index
 final_array = npz["arr_2"] #[I, ts, P_index, curve_straight]
-interpolated_array = npz["arr_3"] #[X, Y, ts, I] (I = index of row in original csv)
+interpolated_array = npz["arr_3"] #[X, Y, ts, I, m_per_s] (I = index of row in original csv)
+                                    # X, Y, I, ts, m_s, position # but this is the I after interpolation
 
-ts_min = init_array[:, 2].min()
+ts_min = init_array[:, 3].min()
 
-init_array[:, 2] = init_array[:, 2]-ts_min
+init_array[:, 3] = init_array[:, 3]-ts_min
 final_array[:, 1] = final_array[:, 1]-ts_min
-interpolated_array[:, 2] = interpolated_array[:, 2]-ts_min
+interpolated_array[:, 3] = interpolated_array[:, 3]-ts_min
 
-ts_max = init_array[:, 2].max()
+ts_max = init_array[:, 3].max()
 x_max = init_array[:, 0].max()
 y_max = init_array[:, 1].max()
 
@@ -45,7 +49,7 @@ if False:
 
 
 interpolated_array = interpolated_array[
-    np.logical_and(interpolated_array[:, 2] > 0, interpolated_array[:, 2] < ts_max)
+    np.logical_and(interpolated_array[:, 3] > 0, interpolated_array[:, 3] < ts_max)
     ]
 
 xy_max = x_max if x_max > y_max else y_max
@@ -70,12 +74,17 @@ del df_final_joined["p_index"]
 
 df_init = pd.DataFrame(
     data=init_labeled,
-    columns=["lon", "lat", "timestamp", "I", "source"]
+    columns=["lon", "lat", "I", "timestamp", "speed", "source"]
 )
 df_interpolated = pd.DataFrame(
     data=interpolated_labeled,
-    columns=["lon", "lat", "timestamp", "I", "source"]
+    columns=["lon", "lat", "I", "timestamp", "speed", "position", "source"] # "position"
 )
+
+if False:
+    print(df_interpolated)
+    df_interpolated = df_interpolated.sort_values(df_interpolated.index)
+    print(df_interpolated)
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
@@ -85,9 +94,9 @@ df_final_joined["timestamp"] /= 60
 df_init["timestamp"] /= 60
 df_interpolated["timestamp"]/=60
 x, y, z = df_final_joined["lon"], df_final_joined["lat"], df_final_joined["timestamp"]
-x1, y1, z1 = df_interpolated["lon"], df_interpolated["lat"], df_interpolated["timestamp"]
+x1, y1, z1, speed1, position1 = df_interpolated["lon"], df_interpolated["lat"], df_interpolated["timestamp"], df_interpolated["speed"], df_interpolated["position"]
+speed1 = 400 * 1 / (speed1 + .0001) # to ensure no division by 0
 x_init, y_init, z_init = df_init["lon"], df_init["lat"], df_init["timestamp"]
-
 df_snap = pd.DataFrame(
     [
         t for I in df_final_joined["I"] for t in [
@@ -123,15 +132,47 @@ fig = go.Figure(
         ),
         go.Scatter3d(
             x=x, y=y, z=z,
-            marker=dict(size=2.75, color=z, colorscale='Portland'),
+            marker=dict(size=2, color='black'),# color=z, colorscale='Portland'),
             mode="markers",
             visible='legendonly',
             name="Snapped GPS nodes",
         ),
         go.Scatter3d(
             x=x1, y=y1, z=z1,
-            marker=dict(size=1.1, color=z1, colorscale='Portland'),
-            line=dict(color='#303030',width=1.5),
+            #marker=dict(
+            #    colorbar=dict(
+            #        thickness=10,
+            #        lenmode="fraction",
+            #        len=.7,
+            #    ),
+            #    size=3.5,
+            #    color=speed1,
+            #    colorscale='Portland',
+            #    cmax=80,
+            #    cmin=65,
+            #    showscale=True,
+            #    reversescale=True
+            #),
+            #color was z1 # size was 1.1
+            line=dict(
+                colorbar=dict(
+                    thickness=10,
+                    lenmode="fraction",
+                    len=.6,
+                ),
+                width=5,
+                color=speed1,
+                colorscale='Portland',
+                cmax=80,
+                cmin=65,
+                showscale=True,
+                reversescale=True
+            ),
+                #color=speed1, colorscale='Portland', width=6.5, cmax=80, cmin=65, showscale=True, reversescale=True),
+            #'#303030',width=1.5),
+            text=position1,
+            hoverinfo="text",
+            mode="lines",
             name="Interpolated Track",
         ),
     ],

@@ -1,6 +1,5 @@
 def FitFile_To_DF(FIT):
     java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
-    FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
     java_CMD = [java, "-jar", FitCSVTool_jar, "-b", FIT, CSV]
     subprocess.call(java_CMD, stdout=subprocess.DEVNULL) #suppress print messages
     df = pd.read_csv(CSV)
@@ -9,7 +8,7 @@ def FitFile_To_DF(FIT):
         (df['Field 2'] == "position_lat") &
         (df['Field 3'] == "position_long") &
         (df['Value 1'] != 1)
-        ][["Local Number", "Value 1", "Value 2", "Value 3"]]
+        ][["Value 1", "Value 2", "Value 3", "Value 5"]] # ts, lat, lon, m_per_s
 
 
 def EnterCorrectionsToFitFile(TrackWorkout, Track):
@@ -31,6 +30,8 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
             return Track[:, :][p]
         def NeedToInterpolateCurve(): # between this point and next point
             next_ = TrackWorkout[TrackWorkout[:, 0]==index-1]
+            position_next = next_[:, 2]
+            if position == position_next: return False, None, None, None
             c_s_next, ts_next = next_[:, 3], next_[:, 1]
             if ts - ts_next > 20:
                 return False, None, None, None
@@ -73,17 +74,19 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
                         new_value = float(start_row[value_index]) + (new_value[0])*while_loops
                         new_value = int(round(new_value)) if round_to == 0 else round(new_value, round_to)
                     new_row.append(str(new_value))
-                #print(new_row)
                 if Direction=="+": track_node += 1
                 else: track_node -= 1
                 if track_node < 0: track_node = len(Track)-1
                 if track_node > len(Track)-1: track_node = 0
                 interp_lon, interp_lat = XY_TrackPosition(track_node)
-                new_row[i_lon] = interp_lon
-                new_row[i_lat] = interp_lat
+                new_row[i_lon] = str(round(interp_lon))
+                new_row[i_lat] = str(round(interp_lat))
+                lonlat = "{}.0{}.0".format(new_row[i_lon], new_row[i_lat])
+                if lonlat not in positions.keys(): positions[lonlat] = track_node
                 ROWS.insert(i, new_row)
                 PointsBetween -= 1
 
+        positions = {}
         R = csv.reader(open(CSV))
         ROWS = list(R)
         H = ROWS[0]
@@ -97,6 +100,8 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
             lon, lat = XY_TrackPosition(position)
             ROWS[i][i_lon] = str(round(lon))
             ROWS[i][i_lat] = str(round(lat))
+            lonlat = "{}.0{}.0".format(ROWS[i][i_lon], ROWS[i][i_lat])
+            if lonlat not in positions.keys(): positions[lonlat] = position
 
             needed, next_, c_s_next, ts_next = NeedToInterpolateCurve()
             if needed: InterpolateCurve()
@@ -105,19 +110,18 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
         W = csv.writer(open(CSV, "w", newline=""))
         W.writerows(ROWS)
 
-        return ROWS
+        return ROWS, positions
 
     def Csv_To_FitFile():
         java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
-        FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
         java_CMD = [java, "-jar", FitCSVTool_jar, "-c", CSV, snappedFit]
         subprocess.call(java_CMD, stdout=subprocess.DEVNULL)
 
     snappedFit = FIT.replace(".FIT", "_snapped.FIT")
-    csvRows = EditCsv()
+    csvRows, allPositions = EditCsv()
     Csv_To_FitFile()
 
-    return csvRows, snappedFit
+    return csvRows, snappedFit, allPositions
 
 
 def Semicircles_to_DecimalDegrees(scArray):
@@ -136,16 +140,19 @@ def Utm_to_DecimalDegrees(utmArray, zone):
 
 
 def Dataframe_to_UtmArray(df, X_min=None, Y_min=None):
-    lon, lat, ts, I = "Value 3", "Value 2", "Value 1", "I"
+    spatial_cols = ("Value 3", "Value 2")
+    lon, lat = spatial_cols#, ts, I, "Value 1", "I"
+    I = "I"
+    nonspatial_cols = [c for c in df.columns if c not in spatial_cols]
     df[I] = df.index + 1
-    TS = df[[ ts, I ]].to_numpy()
+    nonspatial_attributes = df[ [I] + nonspatial_cols ].to_numpy()
     XY_sc = df[[ lon, lat ]].to_numpy()
     XY_dd = Semicircles_to_DecimalDegrees(XY_sc)
     XY_utm, UtmZone = DecimalDegrees_to_Utm(XY_dd)
     X, Y = XY_utm[:,0:1], XY_utm[:,1:]
     if X_min is None and Y_min is None:
         X_min, Y_min = X.min(), Y.min()
-    XY_utm_adjusted = np.hstack(( X-X_min, Y-Y_min, TS))
+    XY_utm_adjusted = np.hstack(( X-X_min, Y-Y_min, nonspatial_attributes))
     return XY_utm_adjusted, UtmZone, X_min, Y_min
 
 
@@ -166,24 +173,37 @@ def Cluster(input_array, min_cluster_size):
     return count_unique_clusters, results_input_array
 
 
-def PlotEllipse(x, xMin, xMax, yMin, yMax, ellipseArray, n, n_tot, trackArray):
+def PlotEllipse(ellipseArray, clusterArray, trackArray): #x, xMin, xMax, yMin, yMax, 
+    # clusterProbabilities,
+    #cluster labels
     # set colors by cluster number
-    color_palette = sns.color_palette('deep', n_tot)
-    cluster_colors = [color_palette[x] if x >= 0
-                    else (0.5, 0.5, 0.5)
-                    for x in labels]
-    cluster_member_colors = [sns.desaturate(x, p) for x, p in
-                            zip(cluster_colors, probabilities)]
+    #color_palette = sns.color_palette('deep', 2) #ntot
+    #cluster_colors = [color_palette[1] if x >= 0
+    #                else (0.5, 0.5, 0.5)
+    #                for x in clusterProbabilities]
+    #cluster_member_colors = [sns.desaturate(x, p) for x, p in
+    #                        zip(cluster_colors, clusterProbabilities)]
     # plot run points and ellipse of best fit
-    plt.scatter(*ellipseArray.T, s=1)
-    plt.scatter(*trackArray.T, s=1)
-    plt.scatter(*activity_point_array.T, s=1, c=cluster_member_colors, alpha=0.5)
-    plt.axis('scaled')
-    plt.ylim((yMin, yMax))
-    plt.xlim((xMin, xMax))
+    centerArray = np.array(
+        [clusterArray[:, 0].mean(), clusterArray[:, 1].mean()]
+    )
 
+    qualifyingCluster = clusterArray[
+        np.where(
+            ((clusterArray[:, 0] - centerArray[0]) ** 2 + (clusterArray[:, 1] - centerArray[1]) ** 2) ** (1/2) > 60
+        )
+    ]
+    #print(qualifyingCluster)
+    plt.scatter(*ellipseArray.T)#, s=1)
+    plt.scatter(*trackArray.T)#, s=1)
+    #plt.scatter(*clusterArray.T)#, s=1)#, c=cluster_member_colors, alpha=0.5)
+    plt.scatter(*centerArray.T)
+    plt.axis('scaled')
+    plt.scatter(*qualifyingCluster.T)
+    plt.ylim((clusterArray[:, 1].min(), clusterArray[:, 1].max()))
+    plt.xlim((clusterArray[:, 0].min(), clusterArray[:, 0].max()))
     # save
-    plt.savefig(r"C:\Users\silas.frantz\Desktop\_Strava\track_ellipse_{}.png".format(n))
+    plt.savefig(r"C:\Users\silas.frantz\Desktop\TrakCat\track_ellipse.png")
 
 
 def GeneratePointsAlongEllipse(coeffs, xMin, xMax):
@@ -259,13 +279,15 @@ def Generate400mTrack(ellipseArray):
 
     Pi = np.pi
     # Find ellipse length to width ratio
-    eX, eY = ellipseArray[:,0:1],ellipseArray[:,1:]
+    eX, eY = ellipseArray[:,0:1],ellipseArray[:,1:2] #0;1, 1:
     cent = (eX.mean(), eY.mean())
     end1, eL_half = PointOfMaxDistance(fromPT=cent)
     end2, eL = PointOfMaxDistance(fromPT=end1)
     eW_half = MinDistance(fromPT=cent)
-    # empirical adjustment (ratio of track length-to-width to ellipse length-to-width)
-    L_to_W = 1.171291534 * eL_half / eW_half
+    # empirical adjustment (ratio of track length-to-width to ellipse length-to-width) 1.171291534
+    # new empirical adjustment needed ever since i discovered using the extrema... 2021-02-17 # i guess 1.5 works ok - we'll see
+    # using this method - which pretty accurately sets the length - we should probably go with a known full length instead :(
+    L_to_W = 1.45 * eL_half / eW_half
     # below equation derived in merrill lynch notebook
     # parameterizing length_to_width in terms of the track radius (r) = W / 2
     # and known track circumference (C) = 400 = 2 * Pi * r + 2 * (L - 2r)
@@ -338,7 +360,7 @@ def SnapClusterToTrack(workout, track, curveLength):
     track_step = 400 / len(track)
     last_track_position, last_ts = None, None
 
-    for Wx, Wy, ts, I in workout:
+    for Wx, Wy, I, ts, m_s in workout:
         if last_ts is None: last_ts = ts
         time_delta = ts - last_ts#.total_seconds()
         track_position, curve_straight = SnapToTrackNode()
@@ -383,11 +405,18 @@ def FitTrackToCluster(a):
         A = np.hstack([X**2, X * Y, Y**2, X, Y])
         b = np.ones_like(X)
         return np.linalg.lstsq(A, b, rcond=1)[0].squeeze()
-    X = a[:,0:1]
-    Y = a[:,1:2]
+
+    a_curves = a[
+        np.where( # retake a sample of just the track curves to avoid overfitting to either curve
+            ((a[:, 0] - a[:, 0].mean()) ** 2 + (a[:, 1] - a[:, 1].mean()) ** 2) ** (1/2) > 60
+        )
+    ]
+    X = a_curves[:,0:1]
+    Y = a_curves[:,1:2]
     s = LeastSquaresEllipse()
     ellipseArray = GeneratePointsAlongEllipse(s, X.min(), X.max())
-    return Generate400mTrack(ellipseArray)
+    trackArray, curveLength = Generate400mTrack(ellipseArray)
+    return trackArray, curveLength, ellipseArray
 
 
 def TracklikeCluster(n, clusters):
@@ -398,8 +427,8 @@ def TracklikeCluster(n, clusters):
     while n > 0: # -1's are unclassed outliers
         n = n - 1
         cluster = clusters[
-            np.where( # current cluster ID and probability .9+
-                (clusters[:, 0]==n) * (clusters[:, 1] > 0.5) 
+            np.where( # current cluster ID and probability .9+, .5
+                (clusters[:, 0]==n) * (clusters[:, 1] > probability) 
                 )
         ][:, 2:]
         # test to see the quality of ellipse fit for the cluster
@@ -430,10 +459,15 @@ import seaborn as sns, matplotlib.pyplot as plt
 sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
 from apyx import JsonPrettyPrint
 
-FIT = r"C:\Users\silas.frantz\Desktop\B2FE1101.FIT"
+FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\TrakCat\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
+
+FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\B2FE1101.FIT"
+        #B2H90533.FIT" #keira 4x1600
+        #
         #B2A84849.FIT"
         #r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
 CSV = FIT.lower().replace(".fit", ".csv")
+probability = 0.8
 
 df = FitFile_To_DF(FIT)
 UtmArray, UtmZone, X_min, Y_min = Dataframe_to_UtmArray(df)
@@ -445,26 +479,41 @@ Y_min = Y_min + Y_min_track
 if not tracklike_cluster_found:
     print("No tracklike XY cluster detected in this activity.")
     #return original fit file
-trackArray, curveLength = FitTrackToCluster(cluster)
+trackArray, curveLength, ellipse = FitTrackToCluster(cluster)
 TrackWorkout = SnapClusterToTrack(cluster, trackArray, curveLength) # index_csv, timestamp, track_position_index, curve_or_straight
 trackArray_UTM = XY_BackTo_Semicircles(trackArray, X_min, Y_min, UtmZone)
-CSV_Rows, FIT_Snapped = EnterCorrectionsToFitFile(TrackWorkout, trackArray_UTM)
+CSV_Rows, FIT_Snapped, Positions_Dict = EnterCorrectionsToFitFile(TrackWorkout, trackArray_UTM)
 
 # prepare to visualize... need to pickle numpy array of final points w/ interpolations
 df_snapped = FitFile_To_DF(FIT_Snapped)
+
+# repair connections to the "position" which will be used in all analysis
+if True:
+    df_snapped["lonlat"] = df_snapped["Value 3"].astype(str) + df_snapped["Value 2"].astype(str)
+    df_positions = pd.DataFrame(list(Positions_Dict.items()), columns=["lonlat", "position"])
+    df_snapped = pd.merge(df_snapped, df_positions, how="left", left_on="lonlat", right_on="lonlat")
+    del df_snapped["lonlat"]
+
 UtmArray_Snapped, UtmZone, X_min, Y_min = Dataframe_to_UtmArray(df_snapped, X_min, Y_min)
 
 StoreResults(
-    InitialArray=cluster,
-    TrackArray=trackArray,
-    FinalArray=TrackWorkout,
-    InterpolatedArray=UtmArray_Snapped,
+    InitialArray=cluster, #X, Y, I, ts, m_per_s
+    TrackArray=trackArray, #X, Y
+    FinalArray=TrackWorkout, #I,  ts, position, c_s
+    InterpolatedArray=UtmArray_Snapped, # X, Y, I, ts, m_s
 )
 
 print("{}s elapsed".format(round(time.time()-start, 3)))
 
 #labels, probs = clusters[:, 0], clusters[:, 1]
-#PlotEllipse(x, xMin, xMax, yMin, yMax, ellipseArray, n, n_clusters, trackArray)
+#if False:
+PlotEllipse(
+    ellipseArray=ellipse,
+    clusterArray=np.hstack((cluster[:, 0:1], cluster[:, 1:2])),
+    #clusterLabels=cluster[:, 2],
+    #clusterProbabilities=cluster[:, 3],
+    trackArray=trackArray,
+)
 
 # RESOURCES
 # https://hdbscan.readthedocs.io/en/latest/basic_hdbscan.html
