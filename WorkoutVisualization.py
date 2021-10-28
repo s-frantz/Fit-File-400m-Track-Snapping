@@ -1,13 +1,102 @@
+def TrackNodesTraversed(ORIG, DEST, MAX):
+    nodes_traversed = 0
+    forward, backward = ORIG, ORIG
+    while forward != DEST and backward != DEST:
+        nodes_traversed+=1
+        forward+=1
+        backward-=1
+        if forward>MAX: forward=0
+        if backward<0: backward=MAX
+    direction = 1 if forward==DEST else -1
+    return nodes_traversed, direction
+
+def CorrectPaces(a):
+    def CalculatePaces(a_, dist_, splits_):
+        def GetLastPace():
+            i_ = len(correct_paces)-1
+            while i_ >= 0:
+                if correct_paces[i_]!= null_pace:
+                    return correct_paces[i_]
+                i_ -= 1
+        null_pace = 1000
+        # key: X, Y, I, ts, m_s, position
+        correct_paces, split_completion = [null_pace], [0]
+        distance_covered, direction_taken = [0], [0]
+        prev_position, prev_time = a_["position"][0], a_["timestamp"][0]
+        max_position = a_["position"].max() # should be 399 - TEST THIS
+        split_crossings, total_distance = 0, 0
+        time_since_last_split, distance_since_last_split = 0, 0
+        for i, r in a_[1:].iterrows():
+            next_time, next_position = r["timestamp"], r["position"]
+            time_delta = next_time - prev_time
+            try:
+                distance, direction = TrackNodesTraversed(
+                    ORIG=int(prev_position),
+                    DEST=int(next_position),
+                    MAX=max_position
+                )
+            except:
+                distance, direction = 0, 0
+            distance_since_last_split += distance
+            time_since_last_split += time_delta
+            if next_position in splits_:
+                split_crossings+=1
+                if distance_since_last_split != dist_: # was 400
+                    correct_paces.append(time_since_last_split * 400 / distance_since_last_split)
+                    # i THINK risking div 0 error here
+                else:
+                    correct_paces.append(time_since_last_split * 400 / dist_) # remove *4 for 400s 
+                time_since_last_split, distance_since_last_split = 0, 0
+            else:
+                correct_paces.append(null_pace)
+            direction_taken.append(direction)
+            distance_covered.append(total_distance)
+            split_completion.append(split_crossings)
+            prev_position, prev_time = next_position, next_time
+
+        last_pace = GetLastPace()
+        
+        for i, p in reversed(list(enumerate(correct_paces))):
+            if p!=null_pace: last_pace = p
+            correct_paces[i] = last_pace
+
+        a_["speed_400m"] = correct_paces
+        a_["splits"] = split_completion
+        a_["direction"] = direction_taken
+
+        return a_
+
+    a_100 = CalculatePaces(a.copy(), 100, (0, 101, 201, 301))
+    a_200 = CalculatePaces(a.copy(), 200, (0, 201))
+    a_400 = CalculatePaces(a.copy(), 400, (0,))
+
+    return a_100, a_200, a_400
+
+
 import sys, numpy as np, pandas as pd
 import dash
+import dash_table as dt
 import dash_core_components as dcc
 import dash_html_components as html
 import plotly.graph_objects as go
 import pandas as pd
 
-FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\B2FE1101.FIT"
+FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\_W\B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
+    
+    #B3VA5900.FIT" # 2 x DMR (solo)
+    
+    #B3KB1127.FIT" # 5 x 1K on 1K off
+    
+    #B3DB0907.FIT" # 11 x 800 w/ Will and Cleo
+    
+    #B2FE1101.FIT" #solo 2x(3x1k - 1600)
+    
     #B2H90533.FIT" #keira 4x1600
+    
+    #B2FE1101.FIT" #solo 2x(3x1k - 1600)
+    
     #B2A84849.FIT"
+
 npz = np.load(FIT.replace(".FIT", ".npz"))
 
 init_array = npz["arr_0"]   #[X, Y, ts, I] (I = index of row in original csv)
@@ -81,6 +170,8 @@ df_interpolated = pd.DataFrame(
     columns=["lon", "lat", "I", "timestamp", "speed", "position", "source"] # "position"
 )
 
+df_100, df_interpolated, df_400 = CorrectPaces(a=df_interpolated)
+
 if False:
     print(df_interpolated)
     df_interpolated = df_interpolated.sort_values(df_interpolated.index)
@@ -94,8 +185,10 @@ df_final_joined["timestamp"] /= 60
 df_init["timestamp"] /= 60
 df_interpolated["timestamp"]/=60
 x, y, z = df_final_joined["lon"], df_final_joined["lat"], df_final_joined["timestamp"]
-x1, y1, z1, speed1, position1 = df_interpolated["lon"], df_interpolated["lat"], df_interpolated["timestamp"], df_interpolated["speed"], df_interpolated["position"]
-speed1 = 400 * 1 / (speed1 + .0001) # to ensure no division by 0
+x1, y1, z1 = df_interpolated["lon"], df_interpolated["lat"], df_interpolated["timestamp"]
+speed1, position1 = round(df_interpolated["speed_400m"], 1), df_interpolated["position"]
+splits = df_interpolated["splits"]
+#speed1 = 400 * 1 / (speed1 + .0001) # to ensure no division by 0
 x_init, y_init, z_init = df_init["lon"], df_init["lat"], df_init["timestamp"]
 df_snap = pd.DataFrame(
     [
@@ -139,40 +232,40 @@ fig = go.Figure(
         ),
         go.Scatter3d(
             x=x1, y=y1, z=z1,
-            #marker=dict(
-            #    colorbar=dict(
-            #        thickness=10,
-            #        lenmode="fraction",
-            #        len=.7,
-            #    ),
-            #    size=3.5,
-            #    color=speed1,
-            #    colorscale='Portland',
-            #    cmax=80,
-            #    cmin=65,
-            #    showscale=True,
-            #    reversescale=True
-            #),
+            marker=dict(
+                # colorbar=dict(
+                #    thickness=10,
+                #    lenmode="fraction",
+                #    len=.6,
+                # ),
+               size=2,
+               color=speed1,
+               colorscale='Portland',
+               cmax=90,
+               cmin=64,
+               showscale=False,#True,
+               reversescale=True,
+            ),
             #color was z1 # size was 1.1
             line=dict(
                 colorbar=dict(
-                    thickness=10,
+                    thickness=20,
                     lenmode="fraction",
                     len=.6,
                 ),
-                width=5,
+                width=1.5,
                 color=speed1,
                 colorscale='Portland',
-                cmax=80,
-                cmin=65,
+                cmax=90,
+                cmin=64,
                 showscale=True,
                 reversescale=True
             ),
-                #color=speed1, colorscale='Portland', width=6.5, cmax=80, cmin=65, showscale=True, reversescale=True),
+            #color=speed1, colorscale='Portland', width=6.5, cmax=80, cmin=65, showscale=True, reversescale=True),
             #'#303030',width=1.5),
-            text=position1,
+            text=splits.astype(str) + " - " + speed1.astype(str), #speed1,#position1,
             hoverinfo="text",
-            mode="lines",
+            mode="markers+lines",
             name="Interpolated Track",
         ),
     ],
@@ -212,40 +305,71 @@ fig.update_layout(
             
                                 ])],
     margin=dict(l=0, r=0, t=0, b=0),
-    width=900,
-    height=900,
+    width=1000,
+    height=850,
     autosize=False,
     scene=dict(
         xaxis = dict(nticks=4, range=[0,xy_max], title="X position (m)", showspikes=False),
         yaxis = dict(nticks=4, range=[0,xy_max], title="Y position (m)", showspikes=False),
         zaxis = dict(nticks=4, range=[0,ts_max/60], title="Time (mins)", showspikes=False),
         #camera=dict(
-        #    up=dict(
-        #        x=0,
-        #        y=0,
-        #        z=1
-        #    ),
-        #    eye=dict(
-        #        x=0,
-        #        y=1.0707,
-        #        z=1,
-        #    )
+            #up=dict(x=.5,y=.5,z=.5),
+            #eye=dict(x=1,y=1,z=1,)
+            #eye=dict(x=.6,y=.6,z=.6,)
         #),
-        aspectratio = dict( x=1, y=1, z=0.7 ),
+        aspectratio = dict( x=1, y=1, z=.5 ),
         aspectmode = 'manual'
     ),
 )
 
-config = {  'displaylogo': False}#, 'hovermode':'closest'}#'hoverClosest3d': False}
+df = pd.read_csv('https://raw.githubusercontent.com/plotly/datasets/master/solar.csv')
 
 app.layout = html.Div([
-    dcc.Graph(
-        id='tracks',
-        figure=fig,
-        #shapes=shapes,
-        config=config
-    )
-])
+    # html.Div([
+        dcc.Graph(
+            id='tracks',
+            figure=fig,
+            #shapes=shapes,
+            config={  'displaylogo': False} #'hovermode':'closest'}#'hoverClosest3d': False}
+        ),
+        # html.Div(
+        #             dt.DataTable(
+        #     data=df.to_dict('rows'),
+        #     columns=[{'id': c, 'name': c} for c in df.columns[0:1]],
+        #     style_cell_conditional=[
+        #         {'if': {'column_id': 'Version'},
+        #          'width': '10px'},
+        #         {'if': {'column_id': 'Uptime'},
+        #          'width': '10px'},
+        #     ]
+        # )
+        #     , className="col s6"),
+
+        #"<h1>I am the text boom boom boom </h1>",
+        #html.Div('interesting stuff', style={'display': 'inline-block'}),
+        #html.Div('More intersting stuff', style={'display': 'inline-block'})
+    ],
+)
+
+#     className="row",
+#     ),
+# className="container"
+# )
+
+#, style={'display': 'inline-block'})
+
+# custom color ramp where the various easy paces look ok but the reallly fast stuff also looks really fast
+
+# html.Div(
+#     html.Div(
+#         [
+#             html.Div(table1, className="col s6"),
+#             html.Div(table2, className="col s6"),
+#         ],
+#         className="row",
+#     ),
+#     className="container",
+# )
 
 if __name__ == '__main__':
     app.run_server(debug=False)
