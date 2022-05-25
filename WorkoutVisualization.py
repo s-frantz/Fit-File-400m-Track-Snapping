@@ -81,22 +81,16 @@ import dash_html_components as html
 import plotly.graph_objects as go
 import pandas as pd
 
-FIT_DIR = r"C:\_GitHub\Track-Cat\_W"
+FIT_DIR = r"C:\_GitHub\TrackCat\_W"
 
-FIT_ID = "B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
-    
+FIT_ID = "C5IH3444.FIT" # 10x300 @ Cuesta
+    #"B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
     #B3VA5900.FIT" # 2 x DMR (solo)
-    
     #B3KB1127.FIT" # 5 x 1K on 1K off
-    
     #B3DB0907.FIT" # 11 x 800 w/ Will and Cleo
-    
     #B2FE1101.FIT" #solo 2x(3x1k - 1600)
-    
     #B2H90533.FIT" #keira 4x1600
-    
     #B2FE1101.FIT" #solo 2x(3x1k - 1600)
-    
     #B2A84849.FIT"
 
 FIT = os.path.join(FIT_DIR, FIT_ID)

@@ -1,5 +1,4 @@
 def FitFile_To_DF(FIT):
-    java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
     java_CMD = [java, "-jar", FitCSVTool_jar, "-b", FIT, CSV]
     subprocess.call(java_CMD, stdout=subprocess.DEVNULL) #suppress print messages
     df = pd.read_csv(CSV)
@@ -113,7 +112,6 @@ def EnterCorrectionsToFitFile(TrackWorkout, Track):
         return ROWS, positions
 
     def Csv_To_FitFile():
-        java = r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
         java_CMD = [java, "-jar", FitCSVTool_jar, "-c", CSV, snappedFit]
         subprocess.call(java_CMD, stdout=subprocess.DEVNULL)
 
@@ -203,7 +201,7 @@ def PlotEllipse(ellipseArray, clusterArray, trackArray): #x, xMin, xMax, yMin, y
     plt.ylim((clusterArray[:, 1].min(), clusterArray[:, 1].max()))
     plt.xlim((clusterArray[:, 0].min(), clusterArray[:, 0].max()))
     # save
-    plt.savefig(r"C:\Users\silas.frantz\Desktop\TrakCat\track_ellipse.png")
+    plt.savefig(root_dir + r"\_P\track_ellipse_{}.png".format(FIT_ID.split(".")[0]))
 
 
 def GeneratePointsAlongEllipse(coeffs, xMin, xMax):
@@ -395,7 +393,7 @@ def SnapClusterToTrack(workout, track, curveLength):
         "{}m".format(round(lap_dist)),
         round(400*lap_time/lap_dist, 1) if lap_dist != 0 else 0
     )
-    #JsonPrettyPrint(splits)
+    #pprint.pprint(splits)
     return np.array(SnappedWorkout)
 
             
@@ -454,19 +452,18 @@ start = time.time()
 
 import sys, os, subprocess, csv
 import pandas as pd, numpy as np
-import utm, hdbscan
+import utm, hdbscan#, pprint
 import seaborn as sns, matplotlib.pyplot as plt
-sys.path.append(r'\\ace-ra-fs1\data\GIS\_Dev\python\apyx')
-from apyx import JsonPrettyPrint
 
-FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\TrakCat\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
-
+java = r"C:\Program Files\Java\jre1.8.0_333\bin\java.exe" #r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe"
+root_dir = r"C:\_GitHub\TrackCat"
+FitCSVTool_jar = root_dir + r"\_env\FitSDKRelease_21.67.00\java\FitCSVTool.jar"
+#r"C:\Users\silas.frantz\Desktop\TrakCat\FitSDKRelease_21.47.00\java\FitCSVTool.jar"
 probability = 0.8 #0.5 #if points missing
 min_cluster_nodes = 500 
-FIT_DIR = r"C:\_GitHub\Track-Cat\_W"
-FIT_ID = "C5IH3444.FIT" # 10x300
-
-#"B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
+FIT_DIR = root_dir + r"\_W"
+FIT_ID = "C5IH3444.FIT" # 10x300 @ Cuesta
+        #"B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
         #B3VA5900.FIT" # 2 x DMR (solo)
         #B3KB1127.FIT" # 5 x 1K on 1K off
         #B3DB0907.FIT" # 11 x 800 w/ Will and Cleo
@@ -475,6 +472,7 @@ FIT_ID = "C5IH3444.FIT" # 10x300
         #B2H90533.FIT" #keira 4x1600
         #B2A84849.FIT"
         #r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
+
 FIT = os.path.join(FIT_DIR, FIT_ID)
 CSV = FIT.lower().replace(".fit", ".csv")
 
