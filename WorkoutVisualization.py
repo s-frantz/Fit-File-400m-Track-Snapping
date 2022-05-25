@@ -73,7 +73,7 @@ def CorrectPaces(a):
     return a_100, a_200, a_400
 
 
-import sys, numpy as np, pandas as pd
+import sys, os, numpy as np, pandas as pd
 import dash
 import dash_table as dt
 import dash_core_components as dcc
@@ -81,7 +81,9 @@ import dash_html_components as html
 import plotly.graph_objects as go
 import pandas as pd
 
-FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\_W\B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
+FIT_DIR = r"C:\_GitHub\Track-Cat\_W"
+
+FIT_ID = "B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
     
     #B3VA5900.FIT" # 2 x DMR (solo)
     
@@ -96,6 +98,8 @@ FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\_W\B49A3004.FIT" # 3200 - 3200 - 1
     #B2FE1101.FIT" #solo 2x(3x1k - 1600)
     
     #B2A84849.FIT"
+
+FIT = os.path.join(FIT_DIR, FIT_ID)
 
 npz = np.load(FIT.replace(".FIT", ".npz"))
 

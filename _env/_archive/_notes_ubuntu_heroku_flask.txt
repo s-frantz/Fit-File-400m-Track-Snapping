@@ -1,0 +1,100 @@
+Prereq: follow steps to install WSL (windows linux subsystem)
+	- https://docs.microsoft.com/en-us/windows/wsl/install
+
+Visit this site (primary source) if you encounter any issues while following steps below:
+	- https://www.jcchouinard.com/deploy-a-flask-app-on-heroku/
+
+1. Run your linux terminal (e.g. Ubuntu 20.04)
+
+2. Ensure ubuntu is updated, repeat this first if any steps below fail
+	$ sudo apt update
+
+3. Test that GIT is installed by running:
+	$ git --version
+	- GIT is preinstalled on mine
+
+4. Test that python3 is installed by running:
+	$ python3 -V
+	- Python 3.8.2 is preinstalled on mine
+
+5. Create a new virtual environment:
+	$ sudo apt install python3-pip
+	$ sudo apt install python3-virtualenv
+	$ virtualenv <name-of-your-custom-venv>
+	- I chose to name mine track-cat-venv
+
+6. Activate virtual environment:
+	$ . <name-of-your-custom-venv>/bin/activate
+
+7. Install basic modules required for deployment
+	(<name-of-your-custom-venv>) $ pip3 install requests[security] flask gunicorn
+
+8. Create your flask app
+	- location should be in the home directory, alongside your venv:
+		C:\Ubuntu\rootfs\home\<your-username>
+	- app should live here inside a folder, <name-of-your-app>:
+	$ mkdir <name_of_your_app>
+	- you can create initial files here using:
+	$ cd <name_of_your_app>
+	$ touch views.py
+	$ cd ../
+	$ touch run-<name_of_your_app>.py
+	- contents of views.py would be something like:
+		from flask import Flask
+ 		app = Flask(__name__)
+		@app.route('/')
+		def index():
+		    return '<h1>I am the front end!</h1>'
+	- contents of run-<name_of_your_app>.py would be something like:
+		from <name_of_your_app>.views import app
+		if __name__ == "__main__":
+		    app.run()
+	- test app is functional using:
+	$ python3 run_<name-of-your-app>.py
+
+9. Develop your app!
+	- Make sure your venv is activated, pip3 install needed python modules as you go
+
+10. Freeze your requirements:
+	$ pip3 freeze > requirements.txt
+
+11. Create a gunicorn procfile to house commands for heroku
+	$ echo web: gunicorn <name-of-your-app>:run
+	$ echo web: gunicorn run:<name-of-your-app> >> Procfile
+
+12. Install heroku
+	$ curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+	- If other issues see: https://devcenter.heroku.com/articles/heroku-cli
+	- Create a free account: https://www.heroku.com/
+
+13. Login to Heroku from terminal:
+	$ heroku login
+	- Chrome should pop open, follow instructions on screen.
+
+14. Create your app on Heroku
+	$ heroku create <name-of-your-heroku-app>
+
+15. Add a GIT remote to this Heroku app
+	$ git init
+	$ heroku git:remote -a <name-of-your-heroku-app>
+	$ git remote -v
+	$ git config --global user.email "<your-email-address>"
+	$ git config --global user.name "<your-name>"
+
+16. Deploy your app!
+	$ git add .
+	$ git commit -m "<some-descriptive-text-eg-Init-deploy>"
+	$ git push heroku master
+
+17. Check that your app made it onto a Heroku dyno:
+	https://<name-of-your-heroku-app>.herokuapp.com
+
+18. Basic app management / deletion:
+	Deactivate...
+	$ heroku ps:scale web=0
+	Reactivate...
+	$ heroku ps:scale web=1
+	Delete...
+	$ heroku apps:destroy <heroku-app-name>
+
+	

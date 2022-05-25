@@ -463,7 +463,10 @@ FitCSVTool_jar = r"C:\Users\silas.frantz\Desktop\TrakCat\FitSDKRelease_21.47.00\
 
 probability = 0.8 #0.5 #if points missing
 min_cluster_nodes = 500 
-FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\_W\B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
+FIT_DIR = r"C:\_GitHub\Track-Cat\_W"
+FIT_ID = "C5IH3444.FIT" # 10x300
+
+#"B49A3004.FIT" # 3200 - 3200 - 1600 + fast 400 cutback w/ Keira
         #B3VA5900.FIT" # 2 x DMR (solo)
         #B3KB1127.FIT" # 5 x 1K on 1K off
         #B3DB0907.FIT" # 11 x 800 w/ Will and Cleo
@@ -472,6 +475,7 @@ FIT = r"C:\Users\silas.frantz\Desktop\TrakCat\_W\B49A3004.FIT" # 3200 - 3200 - 1
         #B2H90533.FIT" #keira 4x1600
         #B2A84849.FIT"
         #r"C:\Users\silas.frantz\Desktop\_Strava\Wkt\FIT_TEST.FIT"
+FIT = os.path.join(FIT_DIR, FIT_ID)
 CSV = FIT.lower().replace(".fit", ".csv")
 
 df = FitFile_To_DF(FIT)
